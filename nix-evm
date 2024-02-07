@@ -1,0 +1,59 @@
+#!/bin/bash
+# nix-evm (c) Karim Vergnes <me@thesola.io>
+# Generate portable IMA and EVM signatures from Nix store paths
+
+keypath=/etc/keys/privkey_evm.pem
+
+_on_help() {
+    >&2 echo "Usage: nix-evm [-k path] [-o path] [-r] store_path..."
+    >&2 echo
+    >&2 echo "Options:"
+    >&2 echo "  -k path     EVM private key to sign against"
+    >&2 echo "  -o path     If set, dump xattrs to this file"
+    >&2 echo "  -r          Generate signatures for entire closure"
+    exit 0
+}
+
+_on_sign() {
+    for path
+    do
+        evmctl sign -d -o -k $keypath -r $path
+        ((dump)) && getfattr -d -R -m "" $path
+    done
+}
+
+while getopts rhk:o: opt
+do
+    case ${opt} in
+      h)
+        _on_help;;
+      k)
+        keypath=${OPTARG};;
+      o)
+        output=${OPTARG};;
+      r)
+        recurse=1;;
+      ?)
+        _on_help;;
+    esac
+done
+
+shift $((OPTIND-1))
+
+[[ $# < 1 ]] && _on_help
+
+_nix_path_cmd=(nix --extra-experimental-features "nix-command flakes" path-info)
+((recurse)) && _nix_path_cmd=("${_nix_path_cmd[@]}" --recursive)
+
+for path
+do
+    storepaths=("${storepaths[@]}" $("${_nix_path_cmd[@]}" $path))
+done
+
+if [[ -v output ]]
+then
+    export keypath
+    dump=1 _on_sign "${storepaths[@]}" | gzip > $output
+else
+    _on_sign "${storepaths[@]}"
+fi
